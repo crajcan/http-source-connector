@@ -32,8 +32,6 @@ async fn main() -> tide::Result<()> {
     Ok(())
 }
 async fn get_request(req: Request<State>) -> tide::Result {
-    println!("received get request");
-
     let state = req.state();
     let value = state.get_count.fetch_add(1, Ordering::Relaxed) + 1;
     Ok(format!("Hello, Fluvio! - {value}").into())
@@ -42,8 +40,6 @@ async fn get_request(req: Request<State>) -> tide::Result {
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 async fn get_time_request(_req: Request<State>) -> tide::Result {
-    println!("received time request");
-
     let time = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -58,8 +54,6 @@ struct HelloPostBody {
 }
 
 async fn post_request(mut req: Request<State>) -> tide::Result {
-    println!("received post request");
-
     let HelloPostBody { name } = req.body_json().await?;
     let state = req.state();
     let value = state.post_count.fetch_add(1, Ordering::Relaxed) + 1;
@@ -82,9 +76,9 @@ async fn stream_count_updates(
         let post_received = *new_post_count > post_count;
 
         let event = match (get_received, post_received) {
-            (true, true) => Some("get and post requests received"),
-            (true, false) => Some("get request(s) received"),
-            (false, true) => Some("post request(s) received"),
+            (true, true) => Some("get and post requests"),
+            (true, false) => Some("get request(s)"),
+            (false, true) => Some("post request(s)"),
             (false, false) => None,
         };
 
@@ -93,7 +87,7 @@ async fn stream_count_updates(
             post_count = *new_post_count;
 
             let counts = format!(
-                "{{ \"gets\": {}, \"posts\": {} }}",
+                "{{ \"gets\": {}, \"posts\": {} }},",
                 get_count, post_count,
             );
 
