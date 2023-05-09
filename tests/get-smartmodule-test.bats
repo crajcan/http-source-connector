@@ -5,14 +5,16 @@ setup() {
     ./target/debug/mock-http-server & disown
     MOCK_PID=$!
     FILE=$(mktemp)
-    cp ./tests/get-smartstream-config.yaml $FILE
+    cp ./tests/get-smartmodule-config.yaml $FILE
     UUID=$(uuidgen | awk '{print tolower($0)}')
     TOPIC=${UUID}-topic
     fluvio topic create $TOPIC
 
     MODULE=${UUID}-map
     cd ./crates/test-smartmodule-map
+    echo "biz"
     smdk build
+    echo "buz"
     smdk load
     cd - 
 
