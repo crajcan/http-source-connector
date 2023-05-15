@@ -87,7 +87,7 @@ async fn stream_count_updates(
             post_count = *new_post_count;
 
             let counts = format!(
-                "{{ \"gets\": {}, \"posts\": {} }},",
+                "{{ \"gets\": {}, \"posts\": {} }}",
                 get_count, post_count,
             );
 

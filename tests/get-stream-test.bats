@@ -16,33 +16,33 @@ setup() {
     sed -i.BAK "s/TOPIC/${TOPIC}/g" $CONFIG_FILE
     cat $CONFIG_FILE
 
-    RESULTS_FILE=$(mktemp)
-
     cargo build -p http-source
     ./target/debug/http-source --config $CONFIG_FILE & disown
     CONNECTOR_PID=$!
 }
 
 teardown() {
-    fluvio topic delete $TOPIC
+    echo "topic"
+    echo $TOPIC 
+    # fluvio topic delete $TOPIC /// ********** REMEMEMBER TO CHANGE ME BACK **********
     kill $MOCK_PID
     kill $CONNECTOR_PID
 }
 
 @test "http-connector-get-stream-test" {
     echo "Starting consumer on topic $TOPIC"
-    sleep 13
-
-    # Consume from topic and pipe into results file
-    fluvio consume -B -d $TOPIC > $RESULTS_FILE &
+    sleep 3
 
     # send get requests to mock server
     curl -s http://localhost:8080/get
-    curl -s http://localhost:8080/get
     sleep 1
+    curl -s http://localhost:8080/get
 
-    # assert that the results file contains the expected output
-    cat $RESULTS_FILE
-    assert_output --partial "event: get request(s) received\ndata:{ \"gets\": 1, \"posts\": 0 }"
-    assert_output --partial "event: get request(s) received\ndata:{ \"gets\": 2, \"posts\": 0 }"
+
+    echo "actuallly consuming now" 
+    run fluvio consume --start 0 --end 0 $TOPIC 
+    assert_output --partial $'event:get request(s)\ndata:{ \"gets\": 1, \"posts\": 0 }'
+
+    run fluvio consume --start 1 --end 1 $TOPIC 
+    assert_output --partial $'event:get request(s)\ndata:{ \"gets\": 2, \"posts\": 0 }'
 }

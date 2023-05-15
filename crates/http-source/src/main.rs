@@ -17,11 +17,19 @@ use crate::source::HttpSource;
 #[connector(source)]
 async fn start(config: HttpConfig, producer: TopicProducer) -> Result<()> {
     debug!(?config);
+
     let source = HttpSource::new(&config)?;
-    let mut stream = source.connect(None).await?;
-    while let Some(item) = stream.next().await {
-        trace!(?item);
-        producer.send(RecordKey::NULL, item).await?;
-    }
+
+    // let mut stream = source.connect(None).await?;
+    // while let Some(item) = stream.next().await {
+    //     trace!(?item);
+    //     producer.send(RecordKey::NULL, item).await?;
+    // }
+
+    let mut response = source.streaming_response().await?;
+    source
+        .produce_streaming_data(&mut response, producer)
+        .await?;
+
     Ok(())
 }

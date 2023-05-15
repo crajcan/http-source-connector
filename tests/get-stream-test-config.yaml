@@ -8,5 +8,5 @@ http:
   endpoint: http://127.0.0.1:8080/stream_count_updates
   method: GET
   body: ""
-  delimiter: ",\n"
+  delimiter: "\n\n"
  
