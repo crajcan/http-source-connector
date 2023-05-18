@@ -9,17 +9,20 @@ description = "A Fluvio connector that fetches data from HTTP endpoints"
 
 [dependencies]
 async-trait = { version = "0.1", default-features = false}
+bytes = "1.1.0"
 futures = { version = "0.3", default-features = false}
+futures-util = "0.3.28"
 anyhow = { version = "1.0" }
 async-std = { version = "1.12",  default-features = false, features = ["attributes", "tokio1"]}
 serde = { version = "1.0", default-features = false, features = ["derive"]}
-reqwest = { version = "0.11" }
+reqwest = { version = "0.11", features = ["stream"] }
 serde_json = { version = "1.0", default-features = false, features = ["preserve_order"] }
 humantime = { version = "2.1", default-features = false }
 url = { version = "2.3", default-features = false, features = ["serde"] }
 humantime-serde = { version = "1.1", default-features = false  }
 tokio-stream = { version = "0.1", default-features = false, features = ["time"] }
 tokio = { version = "1.23", default-features = false, features = ["time"]}
+pin-utils = "0.1.0"
 
 fluvio = { workspace = true }
 fluvio-connector-common = { workspace = true, features = ["derive"]}

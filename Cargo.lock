@@ -1857,12 +1857,15 @@ dependencies = [
  "anyhow",
  "async-std",
  "async-trait",
+ "bytes",
  "fluvio",
  "fluvio-connector-common",
  "futures",
+ "futures-util",
  "humantime",
  "humantime-serde",
  "mockito",
+ "pin-utils",
  "reqwest",
  "serde",
  "serde_json",
@@ -2854,10 +2857,12 @@ dependencies = [
  "serde_urlencoded",
  "tokio",
  "tokio-native-tls",
+ "tokio-util",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams",
  "web-sys",
  "winreg",
 ]
@@ -3897,6 +3902,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4eff853c4f09eec94d76af527eddad4e9de13b11d6286a1ef7134bc30135a2b7"
 dependencies = [
  "leb128",
+]
+
+[[package]]
+name = "wasm-streams"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6bbae3363c08332cadccd13b67db371814cd214c2524020932f0804b8cf7c078"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

@@ -1,15 +1,14 @@
 mod config;
 mod formatter;
+mod http_response_stream;
 mod source;
 
 use anyhow::Result;
-use async_std::stream::StreamExt;
 use config::HttpConfig;
-use fluvio::{RecordKey, TopicProducer};
+use fluvio::TopicProducer;
 use fluvio_connector_common::{
     connector,
-    tracing::{debug, trace},
-    Source,
+    tracing::debug,
 };
 
 use crate::source::HttpSource;
@@ -26,9 +25,9 @@ async fn start(config: HttpConfig, producer: TopicProducer) -> Result<()> {
     //     producer.send(RecordKey::NULL, item).await?;
     // }
 
-    let mut response = source.streaming_response().await?;
+    let http_response_stream = source.streaming_response().await?;
     source
-        .produce_streaming_data(&mut response, producer)
+        .produce_streaming_data(http_response_stream, producer)
         .await?;
 
     Ok(())
