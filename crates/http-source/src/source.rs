@@ -1,11 +1,10 @@
-use crate::http_response_stream::HttpResponseStream;
+use crate::http_response_stream::*;
 use crate::{
     config::HttpConfig,
     formatter::{formatter, Formatter},
 };
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use bytes::BytesMut;
 use fluvio::{Offset, RecordKey, TopicProducer};
 use fluvio_connector_common::{tracing::error, Source};
 use futures::{stream::LocalBoxStream, StreamExt};
@@ -15,7 +14,7 @@ use std::pin::Pin;
 use tokio::time::Interval;
 use tokio_stream::wrappers::IntervalStream;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 pub(crate) struct HttpSource {
     interval: Interval,
@@ -59,9 +58,9 @@ impl HttpSource {
         })
     }
 
-    pub async fn streaming_response(
+    pub async fn http_response_stream(
         &self,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<bytes::Bytes, reqwest::Error>>>>>
+    ) -> Result<LocalBoxStream<Result<bytes::Bytes, reqwest::Error>>>
     {
         let request_builder = match self.request.try_clone() {
             Some(builder) => builder,
@@ -85,49 +84,12 @@ impl HttpSource {
         Ok(res)
     }
 
-    pub fn chunk_http_stream<'a>(
-        self,
-        stream: futures::stream::LocalBoxStream<
-            'a,
-            Result<bytes::Bytes, reqwest::Error>,
-        >,
-    ) -> LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>> {
-        let buffer = Arc::new(Mutex::new(BytesMut::new()));
-
-        let res = stream.filter_map(move |chunk_result| {
-            let buffer = Arc::clone(&buffer);
-            let delimiter = self.delimiter.as_bytes().to_vec();
-
-            async move {
-                match chunk_result {
-                    Ok(ref chunk) => {
-                        let chunk_bytes = chunk.as_ref();
-                        let mut buffer = buffer.lock().unwrap();
-                        buffer.extend_from_slice(chunk_bytes);
-
-                        if chunk_bytes.ends_with(&delimiter) {
-                            let full_chunk = buffer.clone();
-                            buffer.clear();
-
-                            Some(Ok(full_chunk.freeze()))
-                        } else {
-                            None
-                        }
-                    }
-                    Err(err) => Some(Err(err)),
-                }
-            }
-        });
-
-        res.boxed_local()
-    }
-
     pub async fn produce_streaming_data<'a>(
-        self,
+        &self,
         stream: LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>>,
         producer: TopicProducer,
     ) -> Result<()> {
-        let mut new_stream = self.chunk_http_stream(stream);
+        let mut new_stream = chunk_http_stream(stream, self.delimiter.clone());
 
         while let Some(chunk) = new_stream.next().await {
             let chunk = match chunk {

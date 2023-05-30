@@ -1,112 +1,66 @@
-use futures::stream::LocalBoxStream;
-// use futures_util::stream::Stream;
-use bytes::{Bytes, BytesMut};
-use futures::stream::Stream;
-use pin_utils::unsafe_pinned;
-use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
+use bytes::BytesMut;
+use futures::{stream::LocalBoxStream, StreamExt};
+use std::sync::{Arc, Mutex};
 
-// use bytes::BytesMut;
+pub fn chunk_http_stream<'a>(
+    stream: LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>>,
+    delimiter: String,
+) -> LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>> {
+    let buffer = Arc::new(Mutex::new(BytesMut::new()));
 
-pub struct HttpResponseStream<'a> {
-    inner: LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>>,
-    buffer: BytesMut,
-    delimiter: Vec<u8>,
-}
+    let res = stream.filter_map(move |chunk_result| {
+        let buffer = Arc::clone(&buffer);
+        let delimiter = delimiter.as_bytes().to_vec();
 
-impl<'a> HttpResponseStream<'a> {
-    unsafe_pinned!(
-        inner: LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>>
-    );
+        async move {
+            match chunk_result {
+                Ok(ref chunk) => {
+                    let chunk_bytes = chunk.as_ref();
 
-    pub fn new(
-        stream: LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>>,
-        delimiter: Vec<u8>,
-    ) -> Self {
-        let buffer = BytesMut::new();
+                    let mut buffer = buffer.lock().unwrap();
 
-        HttpResponseStream {
-            inner: stream,
-            buffer,
-            delimiter,
-        }
-    }
-}
+                    buffer.extend_from_slice(chunk_bytes);
 
-impl<'a> Stream for HttpResponseStream<'a> {
-    type Item = Result<Bytes, reqwest::Error>;
+                    if chunk_bytes.ends_with(&delimiter) {
+                        let record = buffer.clone();
+                        buffer.clear();
 
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        let inner_state = self.as_mut().inner.as_mut().poll_next(cx);
-
-        if let Poll::Ready(Some(Ok(ref chunk))) = &inner_state {
-            self.as_mut().buffer.extend_from_slice(chunk);
-
-            if self.buffer.ends_with(&self.delimiter) {
-                println!("chunk ends with delimiter: {:?}", chunk);
-
-                let mut res = BytesMut::new();
-                std::mem::swap(&mut self.buffer, &mut res);
-
-                println!(
-                    "    http_response_stream returning buffer: {:?}",
-                    res
-                );
-
-                return Poll::Ready(Some(Ok(res.into())));
+                        Some(Ok(record.freeze()))
+                    } else {
+                        None
+                    }
+                }
+                Err(err) => Some(Err(err)),
             }
         }
+    });
 
-        inner_state
-    }
+    res.boxed_local()
 }
 
-// impl<'a> Stream for HttpResponseStream<'a> {
-//     type Item = Result<Bytes, reqwest::Error>;
+// #[cfg(test)]
+// mod test {
+//     use std::boxed;
 
-//     fn poll_next(
-//         mut self: Pin<&mut Self>,
-//         cx: &mut Context<'_>,
-//     ) -> Poll<Option<Self::Item>> {
-//         println!("in poll_next for HttpResponseStream");
 
-//         let inner_result = self.as_mut().inner.as_mut().poll_next(cx);
-//         match inner_result {
-//             Poll::Pending => {
-//                 println!("Poll::Pending in HttpResponseStream::poll_next");
-//                 inner_result
-//             }
-//             Poll::Ready(None) => {
-//                 println!("Poll::Ready(None) in HttpResponseStream::poll_next");
-//                 Poll::Ready(None)
-//             }
-//             Poll::Ready(Some(chunk)) => {
-//                 println!(
-//                     "received a chunk in HttpResponseStream::poll_next: {:?}",
-//                     chunk
-//                 );
-//                 self.as_mut().buffer.extend_from_slice(&chunk?);
+//     #[async_std::test]
+//     async fn test_chunk_http_stream_concatenates_chunks() {
+//         let inner_stream = futures::stream::iter(vec![
+//             Ok(bytes::Bytes::from("hello")),
+//             Ok(bytes::Bytes::from(" world")),
+//             Ok(bytes::Bytes::from("!")),
+//             Ok(bytes::Bytes::from("Welcome")),
+//             Ok(bytes::Bytes::from(" to ")),
+//             Ok(bytes::Bytes::from("NY!")),
+//         ]);
+//         let boxed = inner_stream.boxed_local();
 
-//                 if self.buffer.ends_with(&self.delimiter) {
-//                     println!("chunk ends with delimiter");
+//         let chunked_stream = super::chunk_http_stream(boxed, "!".to_string());
 
-//                     let mut res = BytesMut::new();
-//                     std::mem::swap(&mut self.buffer, &mut res);
+//         let Some(first_chunk) = chunked_stream.next().await;
+//         assert_eq!(first_chunk.unwrap(), bytes::Bytes::from("hello world!"));
 
-//                     println!(
-//                         "http_response_stream returning buffer: {:?}",
-//                         res
-//                     );
-//                     Poll::Ready(Some(Ok(res.into())))
-//                 } else {
-//                     println!("chunk does not end with delimiter");
-//                     inner_result
-//                 }
-//             }
-//         }
+//         let Some(second_chunk) = chunked_stream.next().await;
+//         assert_eq!(second_chunk.unwrap(), bytes::Bytes::from("Welcome to NY!"));
 //     }
 // }
