@@ -1,4 +1,4 @@
-use crate::http_response_stream::*;
+use crate::record_stream::*;
 use crate::{
     config::HttpConfig,
     formatter::{formatter, Formatter},
@@ -75,21 +75,19 @@ impl HttpSource {
         };
 
         let res = response.bytes_stream().boxed_local();
-        let delimiter = self.delimiter.as_bytes().to_vec();
-        println!("delimiter: {:?}", delimiter);
 
         Ok(res)
     }
 
     pub async fn produce_streaming_data<'a>(
         &self,
-        stream: LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>>,
+        http_chunk_stream: LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>>,
         producer: TopicProducer,
     ) -> Result<()> {
-        let mut new_stream =
-            accumulator_stream(stream, self.delimiter.clone());
+        let mut record_stream =
+            record_stream(http_chunk_stream, self.delimiter.clone());
 
-        while let Some(chunk) = new_stream.next().await {
+        while let Some(chunk) = record_stream.next().await {
             let chunk = match chunk {
                 Ok(chunk) => chunk,
                 Err(err) => {

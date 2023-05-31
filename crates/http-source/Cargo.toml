@@ -10,6 +10,7 @@ description = "A Fluvio connector that fetches data from HTTP endpoints"
 [dependencies]
 async-trait = { version = "0.1", default-features = false}
 bytes = "1.1.0"
+bstr = "1.5.0"
 futures = { version = "0.3", default-features = false}
 futures-util = "0.3.28"
 anyhow = { version = "1.0" }

@@ -1,6 +1,6 @@
 mod config;
 mod formatter;
-mod http_response_stream;
+mod record_stream;
 mod source;
 
 use anyhow::Result;
@@ -22,9 +22,9 @@ async fn start(config: HttpConfig, producer: TopicProducer) -> Result<()> {
     //     producer.send(RecordKey::NULL, item).await?;
     // }
 
-    let http_response_stream = source.http_response_stream().await?;
+    let http_response_chunk_stream = source.http_response_stream().await?;
     source
-        .produce_streaming_data(http_response_stream, producer)
+        .produce_streaming_data(http_response_chunk_stream, producer)
         .await?;
 
     Ok(())
