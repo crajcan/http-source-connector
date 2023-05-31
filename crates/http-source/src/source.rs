@@ -8,9 +8,7 @@ use async_trait::async_trait;
 use fluvio::{Offset, RecordKey, TopicProducer};
 use fluvio_connector_common::{tracing::error, Source};
 use futures::{stream::LocalBoxStream, StreamExt};
-use futures_util::stream::Stream;
 use reqwest::{Client, RequestBuilder, Url};
-use std::pin::Pin;
 use tokio::time::Interval;
 use tokio_stream::wrappers::IntervalStream;
 
@@ -60,8 +58,7 @@ impl HttpSource {
 
     pub async fn http_response_stream(
         &self,
-    ) -> Result<LocalBoxStream<Result<bytes::Bytes, reqwest::Error>>>
-    {
+    ) -> Result<LocalBoxStream<Result<bytes::Bytes, reqwest::Error>>> {
         let request_builder = match self.request.try_clone() {
             Some(builder) => builder,
             None => {
@@ -89,7 +86,8 @@ impl HttpSource {
         stream: LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>>,
         producer: TopicProducer,
     ) -> Result<()> {
-        let mut new_stream = chunk_http_stream(stream, self.delimiter.clone());
+        let mut new_stream =
+            accumulator_stream(stream, self.delimiter.clone());
 
         while let Some(chunk) = new_stream.next().await {
             let chunk = match chunk {
