@@ -24,7 +24,7 @@ setup() {
 teardown() {
     echo "topic"
     echo $TOPIC 
-    # fluvio topic delete $TOPIC /// ********** REMEMEMBER TO CHANGE ME BACK **********
+    fluvio topic delete $TOPIC
     kill $MOCK_PID
     kill $CONNECTOR_PID
 }
@@ -37,12 +37,13 @@ teardown() {
     curl -s http://localhost:8080/get
     sleep 1
     curl -s http://localhost:8080/get
+    sleep 1
 
 
     echo "actuallly consuming now" 
     run fluvio consume --start 0 --end 0 $TOPIC 
-    assert_output --partial $'{"body":"event:get request(s)\ndata:{ \"gets\": 1, \"posts\": 0 }"}'
+    assert_output --partial $'{"body":"event:get request(s)\\ndata:{ \\"gets\\": 1, \\"posts\\": 0 }"}'
 
     run fluvio consume --start 1 --end 1 $TOPIC 
-    assert_output --partial $'{"body":"event:get request(s)\ndata:{ \"gets\": 2, \"posts\": 0 }"}'
+    assert_output --partial $'{"body":"event:get request(s)\\ndata:{ \\"gets\\": 2, \\"posts\\": 0 }"}'
 }

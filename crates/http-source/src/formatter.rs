@@ -2,6 +2,7 @@ use anyhow::Context;
 use anyhow::Error;
 use anyhow::Result;
 use async_trait::async_trait;
+use bytes::BytesMut;
 use reqwest::Response;
 use serde::Serialize;
 
@@ -13,7 +14,16 @@ use crate::config::{OutputParts, OutputType};
 
 #[async_trait]
 pub(crate) trait Formatter {
-    async fn to_string(&self, response: Response) -> anyhow::Result<String>;
+    async fn response_to_string(
+        &self,
+        response: Response,
+    ) -> anyhow::Result<String>;
+
+    fn streaming_record_to_string(
+        &self,
+        http_response_record: HttpResponseRecord,
+        body: BytesMut,
+    ) -> anyhow::Result<String>;
 }
 
 pub(crate) fn formatter(
@@ -32,8 +42,12 @@ struct TextFormatter(OutputParts);
 
 #[async_trait]
 impl Formatter for JsonFormatter {
-    async fn to_string(&self, response: Response) -> anyhow::Result<String> {
+    async fn response_to_string(
+        &self,
+        response: Response,
+    ) -> anyhow::Result<String> {
         let record = record_from_response(response).await?;
+
         let json_record = match self.0 {
             OutputParts::Body => HttpJsonRecord::from(HttpResponseRecord {
                 body: record.body,
@@ -44,11 +58,40 @@ impl Formatter for JsonFormatter {
 
         Ok(serde_json::to_string(&json_record)?)
     }
+
+    fn streaming_record_to_string(
+        &self,
+        http_response_record: HttpResponseRecord,
+        body: BytesMut,
+    ) -> anyhow::Result<String> {
+        println!(
+            "******* IN streaming record to string************: self.0: {:?}",
+            self.0
+        );
+
+        let json_record = match self.0 {
+            OutputParts::Body => HttpJsonRecord::from(HttpResponseRecord {
+                body: Some(String::from_utf8(body.to_vec())?),
+                ..Default::default()
+            }),
+            OutputParts::Full => {
+                let mut record = HttpJsonRecord::from(http_response_record);
+                record.body = Some(String::from_utf8(body.to_vec())?);
+
+                record
+            }
+        };
+
+        Ok(serde_json::to_string(&json_record)?)
+    }
 }
 
 #[async_trait]
 impl Formatter for TextFormatter {
-    async fn to_string(&self, response: Response) -> anyhow::Result<String> {
+    async fn response_to_string(
+        &self,
+        response: Response,
+    ) -> anyhow::Result<String> {
         let HttpResponseRecord {
             version,
             status_code,
@@ -89,10 +132,56 @@ impl Formatter for TextFormatter {
 
         Ok(record_out_parts.join("\n"))
     }
+
+    fn streaming_record_to_string(
+        &self,
+        http_response_record: HttpResponseRecord,
+        body: BytesMut,
+    ) -> anyhow::Result<String> {
+        let HttpResponseRecord {
+            version,
+            status_code,
+            status_string,
+            headers,
+            ..
+        } = http_response_record;
+
+        let mut record_out_parts: Vec<String> = Vec::new();
+        if let OutputParts::Full = self.0 {
+            // Status Line HTTP/X 200 CANONICAL
+            let status_line: Vec<String> = vec![
+                version.unwrap_or_default(),
+                status_code.unwrap_or_default().to_string(),
+                status_string.unwrap_or_default().to_string(),
+            ];
+            record_out_parts.push(status_line.join(" "));
+
+            // Header lines foo: bar
+            if let Some(headers) = headers {
+                let hdr_out_parts: Vec<String> = headers
+                    .into_iter()
+                    .map(|hdr| format!("{}: {}", hdr.name, hdr.value))
+                    .collect();
+
+                record_out_parts.push(hdr_out_parts.join("\n"));
+            }
+
+            // Body with an empty line between
+            if !body.is_empty() {
+                record_out_parts.push(String::from(""));
+            }
+        };
+        // Body with an empty line between
+        if !body.is_empty() {
+            record_out_parts.push(String::from_utf8(body.to_vec())?);
+        }
+
+        Ok(record_out_parts.join("\n"))
+    }
 }
 
-#[derive(Debug, Default)]
-struct HttpResponseRecord {
+#[derive(Debug, Default, Clone)]
+pub(crate) struct HttpResponseRecord {
     version: Option<String>,
     status_code: Option<u16>,
     status_string: Option<&'static str>,
@@ -100,7 +189,7 @@ struct HttpResponseRecord {
     body: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct HttpHeader {
     name: String,
     value: String,
@@ -167,7 +256,10 @@ impl JsonHeadersValue {
     fn push(&mut self, value: String) {
         match self {
             JsonHeadersValue::One(_) => {
-                let prev = std::mem::replace(self, JsonHeadersValue::Many(Vec::with_capacity(2)));
+                let prev = std::mem::replace(
+                    self,
+                    JsonHeadersValue::Many(Vec::with_capacity(2)),
+                );
                 if let (Self::One(prev_value), Self::Many(vec)) = (prev, self) {
                     vec.push(prev_value);
                     vec.push(value);
@@ -207,9 +299,11 @@ impl From<HttpResponseRecord> for HttpJsonRecord {
     }
 }
 
-async fn record_from_response(response: Response) -> Result<HttpResponseRecord> {
-    let mut response_record =
-        HttpResponseRecord::try_from(&response).context("Failed to read response headers")?;
+async fn record_from_response(
+    response: Response,
+) -> Result<HttpResponseRecord> {
+    let mut response_record = HttpResponseRecord::try_from(&response)
+        .context("Failed to read response headers")?;
     let body = response
         .text()
         .await
@@ -218,7 +312,9 @@ async fn record_from_response(response: Response) -> Result<HttpResponseRecord> 
     Ok(response_record)
 }
 
-fn headers_to_json(headers: Vec<HttpHeader>) -> BTreeMap<String, JsonHeadersValue> {
+fn headers_to_json(
+    headers: Vec<HttpHeader>,
+) -> BTreeMap<String, JsonHeadersValue> {
     let mut result: BTreeMap<String, JsonHeadersValue> = BTreeMap::new();
     for header in headers {
         match result.entry(header.name) {
@@ -269,7 +365,10 @@ mod tests {
                 ),
                 (
                     "name2".to_string(),
-                    JsonHeadersValue::Many(vec!["value21".to_string(), "value22".to_string()])
+                    JsonHeadersValue::Many(vec![
+                        "value21".to_string(),
+                        "value22".to_string()
+                    ])
                 )
             ])
         )
@@ -282,7 +381,7 @@ mod tests {
         let formatter = formatter(OutputType::Text, OutputParts::Full);
 
         //when
-        let string = formatter.to_string(response).await?;
+        let string = formatter.response_to_string(response).await?;
 
         //then
         assert_eq!(
@@ -299,7 +398,7 @@ mod tests {
         let formatter = formatter(OutputType::Text, OutputParts::Body);
 
         //when
-        let string = formatter.to_string(response).await?;
+        let string = formatter.response_to_string(response).await?;
 
         //then
         assert_eq!(string, "world");
@@ -313,7 +412,7 @@ mod tests {
         let formatter = formatter(OutputType::Json, OutputParts::Full);
 
         //when
-        let string = formatter.to_string(response).await?;
+        let string = formatter.response_to_string(response).await?;
 
         //then
         assert_eq!(
@@ -330,7 +429,7 @@ mod tests {
         let formatter = formatter(OutputType::Json, OutputParts::Body);
 
         //when
-        let string = formatter.to_string(response).await?;
+        let string = formatter.response_to_string(response).await?;
 
         //then
         assert_eq!(string, r#"{"body":"world"}"#);
@@ -352,7 +451,7 @@ mod tests {
         let formatter = formatter(OutputType::Json, OutputParts::Body);
 
         //when
-        let res = formatter.to_string(response).await;
+        let res = formatter.response_to_string(response).await;
 
         //then
         mock.assert();

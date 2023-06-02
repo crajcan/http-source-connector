@@ -1,36 +1,52 @@
+use crate::streaming_response_formatter::StreamingResponseFormatter;
 use bstr::ByteSlice;
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use futures::{stream::LocalBoxStream, StreamExt};
 use std::sync::{Arc, Mutex};
 
-pub fn record_stream<'a>(
+pub(crate) fn record_stream<'a>(
     stream: LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>>,
     delimiter: String,
+    formatter: StreamingResponseFormatter,
 ) -> LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>> {
     let buffer = Arc::new(Mutex::new(BytesMut::new()));
 
-    let res = stream.filter_map(move |received_chunk| {
+    let res = stream.filter_map(move |mut received_chunk| {
         let buffer = Arc::clone(&buffer);
         let delimiter = delimiter.as_bytes().to_vec();
+        let formatter = formatter.clone();
 
         async move {
             match received_chunk {
-                Ok(ref received_chunk) => {
+                Ok(ref mut received_chunk) => {
                     let mut buffer = buffer.lock().unwrap();
 
+                    let mut chunk_with_remainder_prepended = buffer.clone();
+                    chunk_with_remainder_prepended
+                        .extend_from_slice(received_chunk);
+
+                    buffer.clear();
+
                     let split_chunk: Vec<&[u8]> =
-                        received_chunk.split_str(&delimiter).collect();
+                        chunk_with_remainder_prepended
+                            .split_str(&delimiter)
+                            .collect();
 
                     if let Some((remainder, records)) = split_chunk.split_last()
                     {
                         let mut result_chunk = None;
 
                         if !records.is_empty() {
-                            buffer
-                                .extend_from_slice(&bstr::join("\n", records));
-                            result_chunk = Some(Ok(buffer.clone().freeze()));
+                            let joined_records = &bstr::join("\n", records);
+                            let mut result_bytes = BytesMut::new();
+                            result_bytes.extend_from_slice(joined_records);
 
-                            buffer.clear();
+                            let formatted =
+                                formatter.format(result_bytes.clone()).ok()?;
+                            result_bytes.clear();
+                            result_bytes.extend_from_slice(formatted.as_bytes());
+
+                            result_chunk = Some(Ok(result_bytes.freeze()));
                         }
 
                         buffer.extend_from_slice(remainder);
@@ -84,8 +100,7 @@ mod test {
         ]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream =
-            super::record_stream(boxed, "!".to_string());
+        let mut chunked_stream = super::record_stream(boxed, "!".to_string());
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
@@ -109,8 +124,7 @@ mod test {
         ]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream =
-            super::record_stream(boxed, "!".to_string());
+        let mut chunked_stream = super::record_stream(boxed, "!".to_string());
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
@@ -132,8 +146,7 @@ mod test {
         ))]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream =
-            super::record_stream(boxed, "!".to_string());
+        let mut chunked_stream = super::record_stream(boxed, "!".to_string());
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
@@ -150,8 +163,7 @@ mod test {
         ]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream =
-            super::record_stream(boxed, "!".to_string());
+        let mut chunked_stream = super::record_stream(boxed, "!".to_string());
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
@@ -169,8 +181,7 @@ mod test {
         ]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream =
-            super::record_stream(boxed, "!".to_string());
+        let mut chunked_stream = super::record_stream(boxed, "!".to_string());
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(

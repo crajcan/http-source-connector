@@ -24,12 +24,12 @@ setup() {
 teardown() {
     echo "topic"
     echo $TOPIC 
-    # fluvio topic delete $TOPIC /// ********** REMEMEMBER TO CHANGE ME BACK **********
+    fluvio topic delete $TOPIC
     kill $MOCK_PID
     kill $CONNECTOR_PID
 }
 
-@test "http-connector-get-stream-test" {
+@test "http-connector-get-stream-test-full" {
     echo "Starting consumer on topic $TOPIC"
     sleep 3
 
@@ -37,24 +37,15 @@ teardown() {
     curl -s http://localhost:8080/get
     sleep 1
     curl -s http://localhost:8080/get
-
-
+    sleep 1
 
     run fluvio consume --start 0 --end 0 -d $TOPIC
     assert_output --partial 'HTTP/1.1 200 OK'
-
-    run fluvio consume --start 0 --end 0 -d $TOPIC
-    assert_output --partial 'content-type: text/plain;charset=utf-8'
-
-    run fluvio consume --start 1 --end 1 $TOPIC 
+    assert_output --partial 'content-type: text/event-stream'
     assert_output --partial $'event:get request(s)\ndata:{ \"gets\": 1, \"posts\": 0 }'
 
-    run fluvio consume --start 2 --end 2 -d $TOPIC
+    run fluvio consume --start 1 --end 1 -d $TOPIC
     assert_output --partial 'HTTP/1.1 200 OK'
-
-    run fluvio consume --start 2 --end 2 -d $TOPIC
-    assert_output --partial 'content-type: text/plain;charset=utf-8'
-
-    run fluvio consume --start 3 --end 3 $TOPIC 
+    assert_output --partial 'content-type: text/event-stream'
     assert_output --partial $'event:get request(s)\ndata:{ \"gets\": 2, \"posts\": 0 }'
 }

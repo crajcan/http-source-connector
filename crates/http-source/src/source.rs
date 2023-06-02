@@ -1,8 +1,9 @@
-use crate::record_stream::*;
+use crate::streaming_response_formatter::StreamingResponseFormatter;
 use crate::{
     config::HttpConfig,
     formatter::{formatter, Formatter},
 };
+use crate::{record_stream::*, streaming_response_formatter};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use fluvio::{Offset, RecordKey, TopicProducer};
@@ -17,7 +18,7 @@ use std::sync::Arc;
 pub(crate) struct HttpSource {
     interval: Interval,
     pub request: RequestBuilder,
-    formatter: Arc<dyn Formatter + Sync + Send>,
+    pub formatter: Arc<dyn Formatter + Sync + Send>,
     pub delimiter: String,
 }
 
@@ -56,6 +57,23 @@ impl HttpSource {
         })
     }
 
+    pub async fn http_response(&self) -> Result<reqwest::Response> {
+        let request_builder = match self.request.try_clone() {
+            Some(builder) => builder,
+            None => {
+                return Err(anyhow!("Request must be cloneable"));
+            }
+        };
+
+        match request_builder.send().await {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                error!(%e);
+                Err(anyhow!("unable to open http stream"))
+            }
+        }
+    }
+
     pub async fn http_response_stream(
         &self,
     ) -> Result<LocalBoxStream<Result<bytes::Bytes, reqwest::Error>>> {
@@ -81,11 +99,18 @@ impl HttpSource {
 
     pub async fn produce_streaming_data<'a>(
         &self,
-        http_chunk_stream: LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>>,
+        http_chunk_stream: LocalBoxStream<
+            'a,
+            Result<bytes::Bytes, reqwest::Error>,
+        >,
+        streaming_response_formatter: StreamingResponseFormatter,
         producer: TopicProducer,
     ) -> Result<()> {
-        let mut record_stream =
-            record_stream(http_chunk_stream, self.delimiter.clone());
+        let mut record_stream = record_stream(
+            http_chunk_stream,
+            self.delimiter.clone(),
+            streaming_response_formatter,
+        );
 
         while let Some(chunk) = record_stream.next().await {
             let chunk = match chunk {
@@ -136,5 +161,5 @@ async fn request(
     let response = request.send().await.context("Request failed")?;
     println!("Response: {:?}", response);
 
-    formatter.to_string(response).await
+    formatter.response_to_string(response).await
 }
