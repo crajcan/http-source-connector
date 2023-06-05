@@ -42,10 +42,12 @@ teardown() {
     run fluvio consume --start 0 --end 0 -d $TOPIC
     assert_output --partial 'HTTP/1.1 200 OK'
     assert_output --partial 'content-type: text/event-stream'
+    assert_output --partial 'transfer-encoding: chunked'
     assert_output --partial $'event:get request(s)\ndata:{ \"gets\": 1, \"posts\": 0 }'
 
     run fluvio consume --start 1 --end 1 -d $TOPIC
     assert_output --partial 'HTTP/1.1 200 OK'
     assert_output --partial 'content-type: text/event-stream'
+    assert_output --partial 'transfer-encoding: chunked'
     assert_output --partial $'event:get request(s)\ndata:{ \"gets\": 2, \"posts\": 0 }'
 }

@@ -43,11 +43,13 @@ teardown() {
     assert_output --partial '"version":"HTTP/1.1",'
     assert_output --partial '"code":200'
     assert_output --partial '"content-type":"text/event-stream"'
+    assert_output --partial '"transfer-encoding":"chunked"'
     assert_output --partial $'"body":"event:get request(s)\\ndata:{ \\"gets\\": 1, \\"posts\\": 0 }"'
 
     run fluvio consume --start 1 --end 1 -d $TOPIC
     assert_output --partial '"version":"HTTP/1.1",'
     assert_output --partial '"code":200'
     assert_output --partial '"content-type":"text/event-stream"'
+    assert_output --partial '"transfer-encoding":"chunked"'
     assert_output --partial $'"body":"event:get request(s)\\ndata:{ \\"gets\\": 2, \\"posts\\": 0 }"'
 }

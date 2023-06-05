@@ -7,6 +7,9 @@ test:
 	bats ./tests/get-test-full.bats
 	bats ./tests/post-test.bats
 	bats ./tests/get-stream-test.bats
+	bats ./tests/get-stream-test-full.bats
+	bats ./tests/get-stream-test-json.bats
+	bats ./tests/get-stream-test-full-json.bats
 
 cloud_e2e_test:
 	bats ./tests/cloud-http-get-test.bats

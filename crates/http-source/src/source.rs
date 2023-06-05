@@ -3,6 +3,7 @@ use crate::{
     config::HttpConfig,
     formatter::{formatter, Formatter},
 };
+
 use crate::{record_stream::*, streaming_response_formatter};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
