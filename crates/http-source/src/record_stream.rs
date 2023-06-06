@@ -1,6 +1,6 @@
 use crate::streaming_response_formatter::StreamingResponseFormatter;
 use bstr::ByteSlice;
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use futures::{stream::LocalBoxStream, StreamExt};
 use std::sync::{Arc, Mutex};
 
@@ -44,7 +44,8 @@ pub(crate) fn record_stream<'a>(
                             let formatted =
                                 formatter.format(result_bytes.clone()).ok()?;
                             result_bytes.clear();
-                            result_bytes.extend_from_slice(formatted.as_bytes());
+                            result_bytes
+                                .extend_from_slice(formatted.as_bytes());
 
                             result_chunk = Some(Ok(result_bytes.freeze()));
                         }
@@ -64,6 +65,7 @@ pub(crate) fn record_stream<'a>(
     res.boxed_local()
 }
 
+#[allow(dead_code)]
 fn last_delim_index(bytes: &[u8], delimiter: &[u8]) -> Option<usize> {
     if delimiter.len() == 0 {
         return None;
@@ -87,7 +89,19 @@ fn last_delim_index(bytes: &[u8], delimiter: &[u8]) -> Option<usize> {
 
 #[cfg(test)]
 mod test {
+    use crate::config::{OutputParts, OutputType};
+    use crate::formatter::{formatter, HttpResponseRecord};
+    use crate::streaming_response_formatter::StreamingResponseFormatter;
     use futures::StreamExt;
+
+    fn streaming_formatter() -> StreamingResponseFormatter {
+        super::StreamingResponseFormatter::new(
+            formatter(OutputType::Text, OutputParts::Body),
+            HttpResponseRecord::default(),
+        )
+        .unwrap()
+    }
+
     #[async_std::test]
     async fn test_record_stream_concatenates_chunks() {
         let inner_stream = futures::stream::iter(vec![
@@ -100,7 +114,8 @@ mod test {
         ]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream = super::record_stream(boxed, "!".to_string());
+        let mut chunked_stream =
+            super::record_stream(boxed, "!".to_string(), streaming_formatter());
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
@@ -124,7 +139,8 @@ mod test {
         ]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream = super::record_stream(boxed, "!".to_string());
+        let mut chunked_stream =
+            super::record_stream(boxed, "!".to_string(), streaming_formatter());
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
@@ -146,7 +162,8 @@ mod test {
         ))]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream = super::record_stream(boxed, "!".to_string());
+        let mut chunked_stream =
+            super::record_stream(boxed, "!".to_string(), streaming_formatter());
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
@@ -163,7 +180,8 @@ mod test {
         ]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream = super::record_stream(boxed, "!".to_string());
+        let mut chunked_stream =
+            super::record_stream(boxed, "!".to_string(), streaming_formatter());
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
@@ -181,7 +199,8 @@ mod test {
         ]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream = super::record_stream(boxed, "!".to_string());
+        let mut chunked_stream =
+            super::record_stream(boxed, "!".to_string(), streaming_formatter());
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(

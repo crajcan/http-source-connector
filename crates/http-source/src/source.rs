@@ -4,7 +4,7 @@ use crate::{
     formatter::{formatter, Formatter},
 };
 
-use crate::{record_stream::*, streaming_response_formatter};
+use crate::record_stream::*;
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use fluvio::{Offset, RecordKey, TopicProducer};

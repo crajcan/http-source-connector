@@ -1,7 +1,5 @@
 use crate::formatter::{Formatter, HttpResponseRecord};
-use anyhow::Context;
 use bytes::BytesMut;
-use reqwest::Response;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -13,10 +11,9 @@ pub struct StreamingResponseFormatter {
 impl StreamingResponseFormatter {
     pub(crate) fn new(
         formatter: Arc<dyn Formatter + Sync + Send>,
-        response: Response,
+        http_response_record: HttpResponseRecord,
     ) -> anyhow::Result<Self> {
-        let http_response_record = HttpResponseRecord::try_from(&response)
-            .context("unable to convert http response to record")?;
+
 
         Ok(Self {
             formatter,

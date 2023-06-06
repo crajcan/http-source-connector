@@ -5,6 +5,7 @@ mod source;
 mod streaming_response_formatter;
 
 use anyhow::Result;
+use anyhow::Context;
 use async_std::stream::StreamExt;
 use config::HttpConfig;
 use fluvio::{RecordKey, TopicProducer};
@@ -16,7 +17,7 @@ use fluvio_connector_common::{
 
 use crate::{
     source::HttpSource,
-    streaming_response_formatter::StreamingResponseFormatter,
+    streaming_response_formatter::StreamingResponseFormatter, formatter::HttpResponseRecord,
 };
 
 #[connector(source)]
@@ -42,10 +43,12 @@ async fn start(config: HttpConfig, producer: TopicProducer) -> Result<()> {
         }
         true => {
             debug!("Streaming from endpoint");
+            let http_response_record = HttpResponseRecord::try_from(&http_response)
+                .context("unable to convert http response to record")?;
 
             let streaming_response_formatter = StreamingResponseFormatter::new(
                 source.formatter.clone(),
-                http_response,
+                http_response_record,
             )?;
 
             let http_response_chunk_stream =
