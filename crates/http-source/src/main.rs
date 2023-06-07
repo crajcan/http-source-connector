@@ -1,65 +1,69 @@
 mod config;
 mod formatter;
+mod polling_source;
 mod record_stream;
 mod source;
 mod streaming_response_formatter;
+mod streaming_source;
 
-use anyhow::Result;
 use anyhow::Context;
+use anyhow::Result;
 use async_std::stream::StreamExt;
 use config::HttpConfig;
 use fluvio::{RecordKey, TopicProducer};
 use fluvio_connector_common::{
     connector,
-    tracing::{debug, trace},
+    tracing::{debug, error, trace},
     Source,
 };
+use polling_source::PollingSource;
+use streaming_source::StreamingSource;
 
-use crate::{
-    source::HttpSource,
-    streaming_response_formatter::StreamingResponseFormatter, formatter::HttpResponseRecord,
-};
+use crate::source::HttpSource;
 
 #[connector(source)]
 async fn start(config: HttpConfig, producer: TopicProducer) -> Result<()> {
     debug!(?config);
 
     let source = HttpSource::new(&config)?;
-    let http_response = source.http_response().await?;
+    let initial_response = source.issue_request().await?;
 
-    match response_headers(&http_response)?.contains("chunked") {
+    match response_headers(&initial_response)?.contains("chunked") {
         false => {
             debug!("Polling endpoint");
 
-            let item =
-                source.formatter.response_to_string(http_response).await?;
-            producer.send(RecordKey::NULL, item).await?;
+            // produce record from initial request
+            let first_record = source
+                .formatter
+                .response_to_string(initial_response)
+                .await?;
+            producer.send(RecordKey::NULL, first_record).await?;
 
-            let mut stream = source.connect(None).await?;
-            while let Some(item) = stream.next().await {
+            let polling_source = PollingSource::new(source);
+            let mut polling_stream = polling_source.connect(None).await?;
+            while let Some(item) = polling_stream.next().await {
                 trace!(?item);
                 producer.send(RecordKey::NULL, item).await?;
             }
         }
         true => {
             debug!("Streaming from endpoint");
-            let http_response_record = HttpResponseRecord::try_from(&http_response)
-                .context("unable to convert http response to record")?;
 
-            let streaming_response_formatter = StreamingResponseFormatter::new(
-                source.formatter.clone(),
-                http_response_record,
-            )?;
+            let streaming_source =
+                StreamingSource::new(source, initial_response)?;
+            let mut continuous_stream = streaming_source.connect(None).await?;
 
-            let http_response_chunk_stream =
-                source.http_response_stream().await?;
-            source
-                .produce_streaming_data(
-                    http_response_chunk_stream,
-                    streaming_response_formatter,
-                    producer,
-                )
-                .await?;
+            while let Some(chunk) = continuous_stream.next().await {
+                let chunk = match chunk {
+                    Ok(chunk) => chunk,
+                    Err(err) => {
+                        error!("Chunk retrieval failed: {}", err);
+                        continue;
+                    }
+                };
+
+                producer.send(RecordKey::NULL, chunk).await?;
+            }
         }
     }
 
