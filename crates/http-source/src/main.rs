@@ -3,10 +3,8 @@ mod formatter;
 mod polling_source;
 mod record_stream;
 mod source;
-mod streaming_response_formatter;
 mod streaming_source;
 
-use anyhow::Context;
 use anyhow::Result;
 use async_std::stream::StreamExt;
 use config::HttpConfig;

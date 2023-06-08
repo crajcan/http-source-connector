@@ -64,11 +64,6 @@ impl Formatter for JsonFormatter {
         http_response_record: HttpResponseRecord,
         body: BytesMut,
     ) -> anyhow::Result<String> {
-        println!(
-            "******* IN streaming record to string************: self.0: {:?}",
-            self.0
-        );
-
         let json_record = match self.0 {
             OutputParts::Body => HttpJsonRecord::from(HttpResponseRecord {
                 body: Some(String::from_utf8(body.to_vec())?),
