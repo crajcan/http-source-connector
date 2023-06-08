@@ -4,6 +4,7 @@ mod polling_source;
 mod record_stream;
 mod source;
 mod streaming_source;
+mod streaming_response_formatter;
 
 use anyhow::Result;
 use async_std::stream::StreamExt;

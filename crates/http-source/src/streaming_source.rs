@@ -1,16 +1,15 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use bstr::ByteSlice;
-use bytes::BytesMut;
+use bytes::{BufMut, BytesMut};
 use fluvio::Offset;
-use fluvio_connector_common::Source;
+use fluvio_connector_common::{tracing::error, Source};
 use futures::{stream::LocalBoxStream, StreamExt};
 use reqwest::Response;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::{
-    formatter::{Formatter, HttpResponseRecord},
-    // streaming_response_formatter::StreamingResponseFormatter,
+    formatter::HttpResponseRecord,
+    streaming_response_formatter::StreamingResponseFormatter,
     HttpSource,
 };
 
@@ -47,83 +46,44 @@ impl<'a> Source<'a, Result<bytes::Bytes, reqwest::Error>> for StreamingSource {
         _offset: Option<Offset>,
     ) -> Result<LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>>> {
         let delimiter = self.source.delimiter.as_bytes().to_vec();
-        let formatter = Arc::clone(&self.source.formatter);
-        let initial_response_record = HttpResponseRecord::try_from(
-            &self.initial_response,
-        )
-        .context("unable to convert http response to HttpResponseRecord")?;
+        let http_response_record = HttpResponseRecord::try_from(&self.initial_response)
+            .context("unable to convert http response to record")?;
+        let formatter = StreamingResponseFormatter::new(
+            Arc::clone(&self.source.formatter),
+            http_response_record,
+        )?;
 
         let bytes_stream = self.http_response_bytes_stream().await?;
 
-        Ok(record_stream(
-            bytes_stream,
-            delimiter,
-            formatter,
-            initial_response_record.into(),
-        ))
+        Ok(record_stream(bytes_stream, delimiter, formatter))
     }
 }
 
 pub(crate) fn record_stream<'a>(
     stream: LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>>,
     delimiter: Vec<u8>,
-    formatter: Arc<dyn Formatter + Sync + Send>,
-    initial_http_response_record: HttpResponseRecord,
+    formatter: StreamingResponseFormatter,
 ) -> LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>> {
     let buffer = Arc::new(Mutex::new(BytesMut::new()));
 
     let res = stream.filter_map(move |mut received_chunk| {
         let buffer = Arc::clone(&buffer);
         let delimiter = delimiter.clone();
-        let formatter = Arc::clone(&formatter);
-        let initial_http_response_record = initial_http_response_record.clone();
+        let formatter = formatter.clone();
 
         async move {
             match received_chunk {
                 Ok(ref mut received_chunk) => {
-                    let mut buffer = buffer.lock().unwrap();
+                    let mut buf = buffer.lock().unwrap();
+                    buf.extend_from_slice(&received_chunk);
 
-                    let mut chunk_with_remainder_prepended = buffer.clone();
-                    chunk_with_remainder_prepended
-                        .extend_from_slice(received_chunk);
-
-                    buffer.clear();
-
-                    let split_chunk: Vec<&[u8]> =
-                        chunk_with_remainder_prepended
-                            .split_str(&delimiter)
-                            .collect();
-
-                    if let Some((remainder, records)) = split_chunk.split_last()
-                    {
-                        let mut result_chunk = None;
-
-                        if !records.is_empty() {
-                            let joined_records = &bstr::join("\n", records);
-                            let mut result_bytes = BytesMut::new();
-                            result_bytes.extend_from_slice(joined_records);
-
-                            let formatted = formatter
-                                .streaming_record_to_string(
-                                    initial_http_response_record,
-                                    result_bytes.clone(),
-                                )
-                                .ok()?;
-                            result_bytes.clear();
-                            result_bytes
-                                .extend_from_slice(formatted.as_bytes());
-
-                            result_chunk = Some(Ok(result_bytes.freeze()));
-                        }
-
-                        buffer.extend_from_slice(remainder);
-
-                        result_chunk
-                    } else {
-                        None
-                    }
+                    dequeue_records(&mut buf, &delimiter, formatter)
                 }
-                Err(err) => Some(Err(err)),
+                Err(err) => {
+                    println!("returning a Some(Err): {:?}", err);
+
+                    Some(Err(err))
+                }
             }
         }
     });
@@ -131,12 +91,104 @@ pub(crate) fn record_stream<'a>(
     res.boxed_local()
 }
 
+fn dequeue_records(
+    mut buf: &mut MutexGuard<BytesMut>,
+    delimiter: &[u8],
+    formatter: StreamingResponseFormatter,
+) -> Option<Result<bytes::Bytes, reqwest::Error>> {
+    let mut result_bytes = BytesMut::new();
+
+    while let Some(index) = first_delim_index(&buf, &delimiter) {
+        let next_record = next_record(&mut buf, index, &delimiter);
+
+        let formatted_record = match formatter.format(next_record) {
+            Ok(record) => record,
+            Err(err) => {
+                error!("formatter.format() failed: {:?}", err);
+                return None;
+            }
+        };
+
+        result_bytes.extend_from_slice(&formatted_record.as_bytes());
+        result_bytes.put(&b"\n"[..]);
+    }
+
+    if result_bytes.is_empty() {
+        return None;
+    }
+
+    Some(Ok(result_bytes.freeze()))
+}
+
+fn next_record(
+    buffer: &mut MutexGuard<BytesMut>,
+    index: usize,
+    delimiter: &[u8],
+) -> BytesMut {
+    let mut next_record = buffer.split_to(index + delimiter.len());
+
+    next_record.truncate(next_record.len() - delimiter.len());
+
+    next_record
+}
+
+fn first_delim_index(bytes: &[u8], delimiter: &[u8]) -> Option<usize> {
+    if delimiter.len() == 0 {
+        return None;
+    }
+
+    if bytes.len() < delimiter.len() {
+        return None;
+    }
+
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i..].starts_with(delimiter) {
+            return Some(i);
+        }
+
+        i = i + 1;
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod test {
     use crate::config::{OutputParts, OutputType};
     use crate::formatter::{formatter, HttpResponseRecord};
+    use crate::streaming_response_formatter::StreamingResponseFormatter;
     use futures::StreamExt;
-    use std::sync::Arc;
+
+    fn mock_streaming_formatter() -> StreamingResponseFormatter {
+        let formatter = formatter(OutputType::Text, OutputParts::Body);
+        let http_response_record = HttpResponseRecord::default();
+
+        super::StreamingResponseFormatter::new(formatter, http_response_record)
+            .unwrap()
+    }
+
+    #[test]
+    fn my_test_bytes() {
+        use bytes::{BufMut, BytesMut};
+
+        let mut buf = BytesMut::with_capacity(1024);
+        buf.put(&b"hello world"[..]);
+        buf.put_u16(1234);
+
+        let a = buf.split();
+        let c = b"hello world\x04\xD2";
+        let d = &c[..];
+
+        assert_eq!(a, d);
+
+        buf.put(&b"goodbye world"[..]);
+
+        let b = buf.split();
+        assert_eq!(b, b"goodbye world"[..]);
+
+        assert_eq!(buf.capacity(), 998);
+    }
 
     #[async_std::test]
     async fn test_record_stream_concatenates_chunks() {
@@ -153,20 +205,19 @@ mod test {
         let mut chunked_stream = super::record_stream(
             boxed,
             vec![b'!'],
-            formatter(OutputType::Text, OutputParts::Body),
-            HttpResponseRecord::default(),
+            mock_streaming_formatter()
         );
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
             first_chunk.unwrap().unwrap(),
-            bytes::Bytes::from("Hello world")
+            bytes::Bytes::from("Hello world\n")
         );
 
         let second_chunk = chunked_stream.next().await;
         assert_eq!(
             second_chunk.unwrap().unwrap(),
-            bytes::Bytes::from(" Welcome to NY")
+            bytes::Bytes::from(" Welcome to NY\n")
         );
     }
 
@@ -182,20 +233,19 @@ mod test {
         let mut chunked_stream = super::record_stream(
             boxed,
             vec![b'!'],
-            formatter(OutputType::Text, OutputParts::Body),
-            HttpResponseRecord::default(),
+            mock_streaming_formatter()
         );
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
             first_chunk.unwrap().unwrap(),
-            bytes::Bytes::from("Hello world")
+            bytes::Bytes::from("Hello world\n")
         );
 
         let second_chunk = chunked_stream.next().await;
         assert_eq!(
             second_chunk.unwrap().unwrap(),
-            bytes::Bytes::from(" Welcome to NY")
+            bytes::Bytes::from(" Welcome to NY\n")
         );
     }
 
@@ -209,14 +259,13 @@ mod test {
         let mut chunked_stream = super::record_stream(
             boxed,
             vec![b'!'],
-            formatter(OutputType::Text, OutputParts::Body),
-            HttpResponseRecord::default(),
+            mock_streaming_formatter()
         );
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
             first_chunk.unwrap().unwrap(),
-            bytes::Bytes::from("Hello world\n Welcome to NY")
+            bytes::Bytes::from("Hello world\n Welcome to NY\n")
         );
     }
 
@@ -231,14 +280,13 @@ mod test {
         let mut chunked_stream = super::record_stream(
             boxed,
             vec![b'!'],
-            formatter(OutputType::Text, OutputParts::Body),
-            HttpResponseRecord::default(),
+            mock_streaming_formatter()
         );
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
             first_chunk.unwrap().unwrap(),
-            bytes::Bytes::from("Hello world\n Welcome to NY")
+            bytes::Bytes::from("Hello world\n Welcome to NY\n")
         );
     }
 
@@ -254,20 +302,19 @@ mod test {
         let mut chunked_stream = super::record_stream(
             boxed,
             vec![b'!'],
-            formatter(OutputType::Text, OutputParts::Body),
-            HttpResponseRecord::default(),
+            mock_streaming_formatter()
         );
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
             first_chunk.unwrap().unwrap(),
-            bytes::Bytes::from("Hello world")
+            bytes::Bytes::from("Hello world\n")
         );
 
         let second_chunk = chunked_stream.next().await;
         assert_eq!(
             second_chunk.unwrap().unwrap(),
-            bytes::Bytes::from(" Welcome to NY")
+            bytes::Bytes::from(" Welcome to NY\n")
         );
     }
 
@@ -297,6 +344,36 @@ mod test {
         assert_eq!(super::last_delim_index(b"0123,\n6", b",\n"), Some(4));
         assert_eq!(super::last_delim_index(b"0123,\n6,\n", b",\n"), Some(7));
         assert_eq!(super::last_delim_index(b"0123,\n67,\n", b",\n"), Some(8));
+    }
+
+    #[test]
+    fn test_first_delim_index_finds_single_byte_delimiters() {
+        assert_eq!(super::first_delim_index(b"", b"\n"), None);
+        assert_eq!(super::first_delim_index(b"0", b"\n"), None);
+        assert_eq!(super::first_delim_index(b"\n", b"\n"), Some(0));
+        assert_eq!(super::first_delim_index(b"0\n", b"\n"), Some(1));
+        assert_eq!(super::first_delim_index(b"\n2", b"\n"), Some(0));
+        assert_eq!(super::first_delim_index(b"\n2\n", b"\n"), Some(0));
+        assert_eq!(super::first_delim_index(b"012345", b"\n"), None);
+        assert_eq!(super::first_delim_index(b"0123\n6", b"\n"), Some(4));
+        assert_eq!(super::first_delim_index(b"0123\n5\n", b"\n"), Some(4));
+        assert_eq!(super::first_delim_index(b"0123\n56\n", b"\n"), Some(4));
+        assert_eq!(super::first_delim_index(b"0123\n56\n8", b"\n"), Some(4));
+    }
+
+    #[test]
+    fn test_first_delim_index_finds_multi_bytes_delimiters() {
+        assert_eq!(super::first_delim_index(b"", b",\n"), None);
+        assert_eq!(super::first_delim_index(b"0", b",\n"), None);
+        assert_eq!(super::first_delim_index(b",\n", b",\n"), Some(0));
+        assert_eq!(super::first_delim_index(b"0,\n", b",\n"), Some(1));
+        assert_eq!(super::first_delim_index(b",\n2", b",\n"), Some(0));
+        assert_eq!(super::first_delim_index(b",\n2,\n", b",\n"), Some(0));
+        assert_eq!(super::first_delim_index(b"012345", b",\n"), None);
+        assert_eq!(super::first_delim_index(b"0123,\n6", b",\n"), Some(4));
+        assert_eq!(super::first_delim_index(b"0123,\n6,\n", b",\n"), Some(4));
+        assert_eq!(super::first_delim_index(b"0123,\n67,\n", b",\n"), Some(4));
+        assert_eq!(super::first_delim_index(b"0123,\n67,\n8", b",\n"), Some(4));
     }
 }
 
