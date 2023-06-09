@@ -7,15 +7,12 @@ use futures::{stream::LocalBoxStream, StreamExt};
 use reqwest::Response;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::{
-    formatter::HttpResponseRecord,
-    streaming_response_formatter::StreamingResponseFormatter,
-    HttpSource,
-};
+use crate::{formatter::StreamFormatter, HttpSource};
 
 pub(crate) struct StreamingSource {
     source: HttpSource,
     initial_response: Response,
+    formatter: StreamFormatter,
 }
 
 impl StreamingSource {
@@ -23,9 +20,16 @@ impl StreamingSource {
         source: HttpSource,
         initial_response: Response,
     ) -> Result<Self> {
+        let formatter = StreamFormatter::new(
+            &initial_response,
+            source.output_type,
+            source.output_parts,
+        )?;
+
         Ok(Self {
             source,
             initial_response,
+            formatter,
         })
     }
 
@@ -46,12 +50,7 @@ impl<'a> Source<'a, Result<bytes::Bytes, reqwest::Error>> for StreamingSource {
         _offset: Option<Offset>,
     ) -> Result<LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>>> {
         let delimiter = self.source.delimiter.as_bytes().to_vec();
-        let http_response_record = HttpResponseRecord::try_from(&self.initial_response)
-            .context("unable to convert http response to record")?;
-        let formatter = StreamingResponseFormatter::new(
-            Arc::clone(&self.source.formatter),
-            http_response_record,
-        )?;
+        let formatter = Arc::new(self.formatter.clone());
 
         let bytes_stream = self.http_response_bytes_stream().await?;
 
@@ -62,7 +61,7 @@ impl<'a> Source<'a, Result<bytes::Bytes, reqwest::Error>> for StreamingSource {
 pub(crate) fn record_stream<'a>(
     stream: LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>>,
     delimiter: Vec<u8>,
-    formatter: StreamingResponseFormatter,
+    formatter: Arc<StreamFormatter>,
 ) -> LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>> {
     let buffer = Arc::new(Mutex::new(BytesMut::new()));
 
@@ -94,20 +93,21 @@ pub(crate) fn record_stream<'a>(
 fn dequeue_records(
     mut buf: &mut MutexGuard<BytesMut>,
     delimiter: &[u8],
-    formatter: StreamingResponseFormatter,
+    formatter: Arc<StreamFormatter>,
 ) -> Option<Result<bytes::Bytes, reqwest::Error>> {
     let mut result_bytes = BytesMut::new();
 
     while let Some(index) = first_delim_index(&buf, &delimiter) {
         let next_record = next_record(&mut buf, index, &delimiter);
 
-        let formatted_record = match formatter.format(next_record) {
-            Ok(record) => record,
-            Err(err) => {
-                error!("formatter.format() failed: {:?}", err);
-                return None;
-            }
-        };
+        let formatted_record =
+            match formatter.streaming_record_to_string(next_record) {
+                Ok(record) => record,
+                Err(err) => {
+                    error!("formatter.format() failed: {:?}", err);
+                    return None;
+                }
+            };
 
         result_bytes.extend_from_slice(&formatted_record.as_bytes());
         result_bytes.put(&b"\n"[..]);
@@ -202,11 +202,8 @@ mod test {
         ]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream = super::record_stream(
-            boxed,
-            vec![b'!'],
-            mock_streaming_formatter()
-        );
+        let mut chunked_stream =
+            super::record_stream(boxed, vec![b'!'], mock_streaming_formatter());
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
@@ -230,11 +227,8 @@ mod test {
         ]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream = super::record_stream(
-            boxed,
-            vec![b'!'],
-            mock_streaming_formatter()
-        );
+        let mut chunked_stream =
+            super::record_stream(boxed, vec![b'!'], mock_streaming_formatter());
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
@@ -256,11 +250,8 @@ mod test {
         ))]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream = super::record_stream(
-            boxed,
-            vec![b'!'],
-            mock_streaming_formatter()
-        );
+        let mut chunked_stream =
+            super::record_stream(boxed, vec![b'!'], mock_streaming_formatter());
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
@@ -277,11 +268,8 @@ mod test {
         ]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream = super::record_stream(
-            boxed,
-            vec![b'!'],
-            mock_streaming_formatter()
-        );
+        let mut chunked_stream =
+            super::record_stream(boxed, vec![b'!'], mock_streaming_formatter());
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
@@ -299,11 +287,8 @@ mod test {
         ]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream = super::record_stream(
-            boxed,
-            vec![b'!'],
-            mock_streaming_formatter()
-        );
+        let mut chunked_stream =
+            super::record_stream(boxed, vec![b'!'], mock_streaming_formatter());
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(

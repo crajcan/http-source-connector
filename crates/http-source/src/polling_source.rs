@@ -1,4 +1,5 @@
-use crate::HttpSource;
+use crate::config::{OutputParts, OutputType};
+use crate::{formatter::ResponseFormatter, HttpSource};
 use anyhow::Result;
 use async_trait::async_trait;
 use fluvio::Offset;
@@ -6,11 +7,17 @@ use fluvio_connector_common::{tracing::error, Source};
 use futures::{stream::LocalBoxStream, StreamExt};
 use tokio_stream::wrappers::IntervalStream;
 
-pub(crate) struct PollingSource(HttpSource);
+pub(crate) struct PollingSource {
+    source: HttpSource,
+    formatter: ResponseFormatter,
+}
 
 impl PollingSource {
     pub fn new(source: HttpSource) -> Self {
-        Self(source)
+        let formatter =
+            ResponseFormatter::new(source.output_type, source.output_parts);
+
+        Self { source, formatter }
     }
 }
 
@@ -21,9 +28,9 @@ impl<'a> Source<'a, String> for PollingSource {
         _offset: Option<Offset>,
     ) -> Result<LocalBoxStream<'a, String>> {
         let stream =
-            IntervalStream::new(self.0.interval).filter_map(move |_| {
-                let request_builder = self.0.request.try_clone();
-                let formatter = self.0.formatter.clone();
+            IntervalStream::new(self.source.interval).filter_map(move |_| {
+                let request_builder = self.source.request.try_clone();
+                let formatter = self.formatter.clone();
 
                 async move {
                     let next_request = match request_builder {

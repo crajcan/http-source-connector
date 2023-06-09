@@ -1,7 +1,4 @@
-use crate::{
-    config::HttpConfig,
-    formatter::{formatter, Formatter},
-};
+use crate::config::{HttpConfig, OutputType, OutputParts};
 
 use anyhow::{anyhow, Context, Result};
 use fluvio_connector_common::tracing::error;
@@ -13,8 +10,9 @@ use std::sync::Arc;
 pub(crate) struct HttpSource {
     pub(crate) interval: Interval,
     pub request: RequestBuilder,
-    pub formatter: Arc<dyn Formatter + Sync + Send>,
     pub delimiter: String,
+    pub output_type: OutputType,
+    pub output_parts: OutputParts,
 }
 
 impl HttpSource {
@@ -42,20 +40,17 @@ impl HttpSource {
         }
 
         let interval = tokio::time::interval(config.interval);
-        let formatter = formatter(config.output_type, config.output_parts);
         let delimiter = config.delimiter.clone();
         Ok(Self {
             interval,
             request,
-            formatter,
             delimiter,
+            output_type: config.output_type.clone(),
+            output_parts: config.output_parts.clone(),
         })
     }
 
-
-    pub async fn issue_request(
-        &self
-    ) -> Result<reqwest::Response> {
+    pub async fn issue_request(&self) -> Result<reqwest::Response> {
         let request = self
             .request
             .try_clone()
