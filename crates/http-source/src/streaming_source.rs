@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use bytes::{BufMut, BytesMut};
 use fluvio::Offset;
@@ -156,38 +156,22 @@ fn first_delim_index(bytes: &[u8], delimiter: &[u8]) -> Option<usize> {
 #[cfg(test)]
 mod test {
     use crate::config::{OutputParts, OutputType};
-    use crate::formatter::{formatter, HttpResponseRecord};
-    use crate::streaming_response_formatter::StreamingResponseFormatter;
+    use crate::formatter::StreamFormatter;
     use futures::StreamExt;
+    use mockito::server_url;
+    use reqwest::Client;
+    use std::sync::Arc;
 
-    fn mock_streaming_formatter() -> StreamingResponseFormatter {
-        let formatter = formatter(OutputType::Text, OutputParts::Body);
-        let http_response_record = HttpResponseRecord::default();
+    async fn mock_stream_formatter() -> StreamFormatter {
+        let client = Client::new();
+        let request = client.request(
+            "GET".parse().unwrap(),
+            format!("{}/foobar", server_url()),
+        );
+        let response = request.send().await.unwrap();
 
-        super::StreamingResponseFormatter::new(formatter, http_response_record)
+        StreamFormatter::new(&response, OutputType::Text, OutputParts::Body)
             .unwrap()
-    }
-
-    #[test]
-    fn my_test_bytes() {
-        use bytes::{BufMut, BytesMut};
-
-        let mut buf = BytesMut::with_capacity(1024);
-        buf.put(&b"hello world"[..]);
-        buf.put_u16(1234);
-
-        let a = buf.split();
-        let c = b"hello world\x04\xD2";
-        let d = &c[..];
-
-        assert_eq!(a, d);
-
-        buf.put(&b"goodbye world"[..]);
-
-        let b = buf.split();
-        assert_eq!(b, b"goodbye world"[..]);
-
-        assert_eq!(buf.capacity(), 998);
     }
 
     #[async_std::test]
@@ -202,8 +186,11 @@ mod test {
         ]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream =
-            super::record_stream(boxed, vec![b'!'], mock_streaming_formatter());
+        let mut chunked_stream = super::record_stream(
+            boxed,
+            vec![b'!'],
+            Arc::new(mock_stream_formatter().await),
+        );
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
@@ -227,8 +214,11 @@ mod test {
         ]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream =
-            super::record_stream(boxed, vec![b'!'], mock_streaming_formatter());
+        let mut chunked_stream = super::record_stream(
+            boxed,
+            vec![b'!'],
+            Arc::new(mock_stream_formatter().await),
+        );
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
@@ -250,8 +240,11 @@ mod test {
         ))]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream =
-            super::record_stream(boxed, vec![b'!'], mock_streaming_formatter());
+        let mut chunked_stream = super::record_stream(
+            boxed,
+            vec![b'!'],
+            Arc::new(mock_stream_formatter().await),
+        );
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
@@ -268,8 +261,11 @@ mod test {
         ]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream =
-            super::record_stream(boxed, vec![b'!'], mock_streaming_formatter());
+        let mut chunked_stream = super::record_stream(
+            boxed,
+            vec![b'!'],
+            Arc::new(mock_stream_formatter().await),
+        );
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(
@@ -287,8 +283,11 @@ mod test {
         ]);
         let boxed = inner_stream.boxed_local();
 
-        let mut chunked_stream =
-            super::record_stream(boxed, vec![b'!'], mock_streaming_formatter());
+        let mut chunked_stream = super::record_stream(
+            boxed,
+            vec![b'!'],
+            Arc::new(mock_stream_formatter().await),
+        );
 
         let first_chunk = chunked_stream.next().await;
         assert_eq!(

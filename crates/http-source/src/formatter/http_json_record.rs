@@ -5,7 +5,9 @@ use super::http_response_record::{HttpHeader, HttpResponseRecord};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub(crate) struct HttpJsonRecord {
-    #[serde(skip_serializing_if = "Option::is_none")] status: Option<HttpJsonStatus>, #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<HttpJsonStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     header: Option<BTreeMap<String, JsonHeadersValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     body: Option<String>,
@@ -82,13 +84,59 @@ fn headers_to_json(
     for header in headers {
         match result.entry(header.name) {
             Entry::Occupied(mut entry) => {
-               let foo = entry.get_mut();
-               foo.push(header.value);
-            },
+                let foo = entry.get_mut();
+                foo.push(header.value);
+            }
             Entry::Vacant(entry) => {
                 entry.insert(JsonHeadersValue::One(header.value));
             }
         };
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{headers_to_json, HttpHeader, JsonHeadersValue};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn test_multiple_headers_to_json() {
+        //given
+        let headers = vec![
+            HttpHeader {
+                name: "name1".to_string(),
+                value: "value1".to_string(),
+            },
+            HttpHeader {
+                name: "name2".to_string(),
+                value: "value21".to_string(),
+            },
+            HttpHeader {
+                name: "name2".to_string(),
+                value: "value22".to_string(),
+            },
+        ];
+
+        //when
+        let map = headers_to_json(headers);
+
+        //then
+        assert_eq!(
+            map,
+            BTreeMap::from([
+                (
+                    "name1".to_string(),
+                    JsonHeadersValue::One("value1".to_string())
+                ),
+                (
+                    "name2".to_string(),
+                    JsonHeadersValue::Many(vec![
+                        "value21".to_string(),
+                        "value22".to_string()
+                    ])
+                )
+            ])
+        )
+    }
 }

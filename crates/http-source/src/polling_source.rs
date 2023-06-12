@@ -1,4 +1,3 @@
-use crate::config::{OutputParts, OutputType};
 use crate::{formatter::ResponseFormatter, HttpSource};
 use anyhow::Result;
 use async_trait::async_trait;
@@ -9,7 +8,7 @@ use tokio_stream::wrappers::IntervalStream;
 
 pub(crate) struct PollingSource {
     source: HttpSource,
-    formatter: ResponseFormatter,
+    pub formatter: ResponseFormatter,
 }
 
 impl PollingSource {

@@ -5,8 +5,6 @@ use fluvio_connector_common::tracing::error;
 use reqwest::{Client, RequestBuilder, Url};
 use tokio::time::Interval;
 
-use std::sync::Arc;
-
 pub(crate) struct HttpSource {
     pub(crate) interval: Interval,
     pub request: RequestBuilder,

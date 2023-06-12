@@ -16,7 +16,6 @@ use fluvio_connector_common::{
 };
 use polling_source::PollingSource;
 use streaming_source::StreamingSource;
-use formatter::ResponseFormatter;
 
 use crate::source::HttpSource;
 
@@ -30,18 +29,13 @@ async fn start(config: HttpConfig, producer: TopicProducer) -> Result<()> {
     match response_headers(&initial_response)?.contains("chunked") {
         false => {
             debug!("Polling endpoint");
-            let formatter = ResponseFormatter::new(
-                config.output_type,
-                config.output_parts,
-            );
+            let polling_source = PollingSource::new(source);
 
             // produce record from initial request
-            let first_record = formatter
-                .response_to_string(initial_response)
-                .await?;
+            let first_record =
+                polling_source.formatter.response_to_string(initial_response).await?;
             producer.send(RecordKey::NULL, first_record).await?;
 
-            let polling_source = PollingSource::new(source);
             let mut polling_stream = polling_source.connect(None).await?;
             while let Some(item) = polling_stream.next().await {
                 trace!(?item);
@@ -53,8 +47,8 @@ async fn start(config: HttpConfig, producer: TopicProducer) -> Result<()> {
 
             let streaming_source =
                 StreamingSource::new(source, initial_response)?;
-            let mut continuous_stream = streaming_source.connect(None).await?;
 
+            let mut continuous_stream = streaming_source.connect(None).await?;
             while let Some(chunk) = continuous_stream.next().await {
                 let chunk = match chunk {
                     Ok(chunk) => chunk,

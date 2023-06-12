@@ -1,5 +1,4 @@
 use crate::config::OutputParts;
-use reqwest::Response;
 
 use super::http_response_record::HttpResponseRecord;
 

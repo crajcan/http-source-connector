@@ -1,5 +1,4 @@
 use crate::config::OutputParts;
-use anyhow::Result;
 
 use super::{
     http_json_record::HttpJsonRecord, http_response_record::HttpResponseRecord,
@@ -15,7 +14,7 @@ impl JsonFormatter {
 
     pub fn response_to_string(
         &self,
-        record: HttpResponseRecord
+        record: HttpResponseRecord,
     ) -> anyhow::Result<String> {
         let json_record = match self.0 {
             OutputParts::Body => HttpJsonRecord::from(HttpResponseRecord {
