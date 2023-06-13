@@ -30,12 +30,12 @@ impl ResponseFormatter {
     ) -> Result<String> {
         let record = HttpResponseRecord::record_from_response(response).await?;
 
-        self.record_to_string(record)
+        self.record_to_string(&record)
     }
 
     pub fn record_to_string(
         &self,
-        record: HttpResponseRecord,
+        record: &HttpResponseRecord,
     ) -> Result<String> {
         match self {
             Self::JsonFormatter(formatter) => {

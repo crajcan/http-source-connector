@@ -12,13 +12,14 @@ impl JsonFormatter {
         Self(output_parts)
     }
 
+    // TODO make this zero copy 
     pub fn response_to_string(
         &self,
-        record: HttpResponseRecord,
+        record: &HttpResponseRecord,
     ) -> anyhow::Result<String> {
         let json_record = match self.0 {
-            OutputParts::Body => HttpJsonRecord::from(HttpResponseRecord {
-                body: record.body,
+            OutputParts::Body => HttpJsonRecord::from(&HttpResponseRecord {
+                body: record.body.clone(),
                 ..Default::default()
             }),
             OutputParts::Full => HttpJsonRecord::from(record),

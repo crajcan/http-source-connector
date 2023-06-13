@@ -10,9 +10,10 @@ impl TextFormatter {
         Self(output_parts)
     }
 
+    // TODO make this zero copy
     pub fn response_to_string(
         &self,
-        record: HttpResponseRecord,
+        record: &HttpResponseRecord,
     ) -> anyhow::Result<String> {
         let HttpResponseRecord {
             version,
@@ -26,7 +27,7 @@ impl TextFormatter {
         if let OutputParts::Full = self.0 {
             // Status Line HTTP/X 200 CANONICAL
             let status_line: Vec<String> = vec![
-                version.unwrap_or_default(),
+                version.clone().unwrap_or_default(),
                 status_code.unwrap_or_default().to_string(),
                 status_string.unwrap_or_default().to_string(),
             ];
@@ -49,7 +50,7 @@ impl TextFormatter {
         };
         // Body with an empty line between
         if let Some(body) = body {
-            record_out_parts.push(body);
+            record_out_parts.push(body.clone());
         }
 
         Ok(record_out_parts.join("\n"))

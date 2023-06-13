@@ -50,7 +50,7 @@ impl<'a> Source<'a, Result<bytes::Bytes, reqwest::Error>> for StreamingSource {
         _offset: Option<Offset>,
     ) -> Result<LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>>> {
         let delimiter = self.source.delimiter.as_bytes().to_vec();
-        let formatter = Arc::new(self.formatter.clone());
+        let formatter = Arc::new(Mutex::new(self.formatter.clone()));
 
         let bytes_stream = self.http_response_bytes_stream().await?;
 
@@ -61,7 +61,7 @@ impl<'a> Source<'a, Result<bytes::Bytes, reqwest::Error>> for StreamingSource {
 pub(crate) fn record_stream<'a>(
     stream: LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>>,
     delimiter: Vec<u8>,
-    formatter: Arc<StreamFormatter>,
+    formatter: Arc<Mutex<StreamFormatter>>,
 ) -> LocalBoxStream<'a, Result<bytes::Bytes, reqwest::Error>> {
     let buffer = Arc::new(Mutex::new(BytesMut::new()));
 
@@ -73,10 +73,14 @@ pub(crate) fn record_stream<'a>(
         async move {
             match received_chunk {
                 Ok(ref mut received_chunk) => {
-                    let mut buf = buffer.lock().unwrap();
+                    let mut buf = buffer.lock().expect("buffer lock poisoned");
                     buf.extend_from_slice(&received_chunk);
 
-                    dequeue_records(&mut buf, &delimiter, formatter)
+                    dequeue_records(
+                        &mut buf,
+                        &delimiter,
+                        formatter
+                    )
                 }
                 Err(err) => {
                     println!("returning a Some(Err): {:?}", err);
@@ -93,8 +97,11 @@ pub(crate) fn record_stream<'a>(
 fn dequeue_records(
     mut buf: &mut MutexGuard<BytesMut>,
     delimiter: &[u8],
-    formatter: Arc<StreamFormatter>,
+    formatter: Arc<Mutex<StreamFormatter>>,
 ) -> Option<Result<bytes::Bytes, reqwest::Error>> {
+    let mut formatter = formatter.lock()
+        .expect("formatter lock poisoned");
+
     let mut result_bytes = BytesMut::new();
 
     while let Some(index) = first_delim_index(&buf, &delimiter) {

@@ -32,12 +32,11 @@ impl StreamFormatter {
     }
 
     pub fn streaming_record_to_string(
-        &self,
+        &mut self,
         next_record: BytesMut,
     ) -> Result<String> {
-        let mut new_record = self.http_response_record.clone();
-        new_record.body = Some(String::from_utf8(next_record.to_vec())?);
+        self.http_response_record.body = Some(String::from_utf8(next_record.to_vec())?);
 
-        self.response_formatter.record_to_string(new_record)
+        self.response_formatter.record_to_string(&self.http_response_record)
     }
 }

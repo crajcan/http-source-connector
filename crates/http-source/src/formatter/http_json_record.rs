@@ -52,6 +52,36 @@ impl From<HttpResponseRecord> for HttpJsonRecord {
     }
 }
 
+// TODO make this zero copy
+impl From<&HttpResponseRecord> for HttpJsonRecord {
+    fn from(resp_record: &HttpResponseRecord) -> Self {
+        let HttpResponseRecord {
+            version,
+            status_code,
+            status_string,
+            headers,
+            body,
+        } = resp_record;
+
+        let header = headers.clone().map(headers_to_json);
+
+        let status = match (&version, &status_code, &status_string) {
+            (None, None, None) => None,
+            _ => Some(HttpJsonStatus {
+                version: version.clone(),
+                code: *status_code,
+                string: *status_string,
+            }),
+        };
+
+        HttpJsonRecord {
+            status,
+            header,
+            body: body.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(untagged)]
 enum JsonHeadersValue {
