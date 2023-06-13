@@ -1,3 +1,5 @@
+use anyhow::{Error, Result};
+use bytes::Bytes;
 use serde::Serialize;
 use std::collections::{btree_map::Entry, BTreeMap};
 
@@ -23,38 +25,11 @@ struct HttpJsonStatus {
     string: Option<&'static str>,
 }
 
-impl From<HttpResponseRecord> for HttpJsonRecord {
-    fn from(resp_record: HttpResponseRecord) -> Self {
-        let HttpResponseRecord {
-            version,
-            status_code,
-            status_string,
-            headers,
-            body,
-        } = resp_record;
-
-        let header = headers.map(headers_to_json);
-
-        let status = match (&version, &status_code, &status_string) {
-            (None, None, None) => None,
-            _ => Some(HttpJsonStatus {
-                version,
-                code: status_code,
-                string: status_string,
-            }),
-        };
-
-        HttpJsonRecord {
-            status,
-            header,
-            body,
-        }
-    }
-}
-
 // TODO make this zero copy
-impl From<&HttpResponseRecord> for HttpJsonRecord {
-    fn from(resp_record: &HttpResponseRecord) -> Self {
+impl TryFrom<&HttpResponseRecord> for HttpJsonRecord {
+    type Error = Error;
+
+    fn try_from(resp_record: &HttpResponseRecord) -> Result<Self> {
         let HttpResponseRecord {
             version,
             status_code,
@@ -74,11 +49,16 @@ impl From<&HttpResponseRecord> for HttpJsonRecord {
             }),
         };
 
-        HttpJsonRecord {
+        let body = match body {
+            None => None,
+            Some(body) => Some(String::from_utf8(body.to_vec())?),
+        };
+
+        Ok(HttpJsonRecord {
             status,
             header,
-            body: body.clone(),
-        }
+            body: body,
+        })
     }
 }
 

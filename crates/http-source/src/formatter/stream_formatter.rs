@@ -1,6 +1,6 @@
 use crate::config::{OutputParts, OutputType};
 use anyhow::{Context, Result};
-use bytes::BytesMut;
+use bytes::{BytesMut, Bytes};
 
 use super::{
     http_response_record::HttpResponseRecord,
@@ -33,10 +33,11 @@ impl StreamFormatter {
 
     pub fn streaming_record_to_string(
         &mut self,
-        next_record: BytesMut,
+        next_record: Bytes,
     ) -> Result<String> {
-        self.http_response_record.body = Some(String::from_utf8(next_record.to_vec())?);
+        self.http_response_record.body = Some(next_record);
 
-        self.response_formatter.record_to_string(&self.http_response_record)
+        self.response_formatter
+            .record_to_string(&self.http_response_record)
     }
 }

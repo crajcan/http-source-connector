@@ -18,11 +18,11 @@ impl JsonFormatter {
         record: &HttpResponseRecord,
     ) -> anyhow::Result<String> {
         let json_record = match self.0 {
-            OutputParts::Body => HttpJsonRecord::from(&HttpResponseRecord {
+            OutputParts::Body => HttpJsonRecord::try_from(&HttpResponseRecord {
                 body: record.body.clone(),
                 ..Default::default()
-            }),
-            OutputParts::Full => HttpJsonRecord::from(record),
+            })?,
+            OutputParts::Full => HttpJsonRecord::try_from(record)?,
         };
 
         Ok(serde_json::to_string(&json_record)?)

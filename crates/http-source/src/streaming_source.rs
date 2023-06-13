@@ -76,11 +76,7 @@ pub(crate) fn record_stream<'a>(
                     let mut buf = buffer.lock().expect("buffer lock poisoned");
                     buf.extend_from_slice(&received_chunk);
 
-                    dequeue_records(
-                        &mut buf,
-                        &delimiter,
-                        formatter
-                    )
+                    dequeue_records(&mut buf, &delimiter, formatter)
                 }
                 Err(err) => {
                     println!("returning a Some(Err): {:?}", err);
@@ -99,8 +95,7 @@ fn dequeue_records(
     delimiter: &[u8],
     formatter: Arc<Mutex<StreamFormatter>>,
 ) -> Option<Result<bytes::Bytes, reqwest::Error>> {
-    let mut formatter = formatter.lock()
-        .expect("formatter lock poisoned");
+    let mut formatter = formatter.lock().expect("formatter lock poisoned");
 
     let mut result_bytes = BytesMut::new();
 
@@ -108,7 +103,7 @@ fn dequeue_records(
         let next_record = next_record(&mut buf, index, &delimiter);
 
         let formatted_record =
-            match formatter.streaming_record_to_string(next_record) {
+            match formatter.streaming_record_to_string(next_record.freeze()) {
                 Ok(record) => record,
                 Err(err) => {
                     error!("formatter.format() failed: {:?}", err);
@@ -196,7 +191,7 @@ mod test {
         let mut chunked_stream = super::record_stream(
             boxed,
             vec![b'!'],
-            Arc::new(mock_stream_formatter().await),
+            Arc::new(mock_stream_formatter().await.into()),
         );
 
         let first_chunk = chunked_stream.next().await;
@@ -224,7 +219,7 @@ mod test {
         let mut chunked_stream = super::record_stream(
             boxed,
             vec![b'!'],
-            Arc::new(mock_stream_formatter().await),
+            Arc::new(mock_stream_formatter().await.into()),
         );
 
         let first_chunk = chunked_stream.next().await;
@@ -250,7 +245,7 @@ mod test {
         let mut chunked_stream = super::record_stream(
             boxed,
             vec![b'!'],
-            Arc::new(mock_stream_formatter().await),
+            Arc::new(mock_stream_formatter().await.into()),
         );
 
         let first_chunk = chunked_stream.next().await;
@@ -271,7 +266,7 @@ mod test {
         let mut chunked_stream = super::record_stream(
             boxed,
             vec![b'!'],
-            Arc::new(mock_stream_formatter().await),
+            Arc::new(mock_stream_formatter().await.into()),
         );
 
         let first_chunk = chunked_stream.next().await;
@@ -293,7 +288,7 @@ mod test {
         let mut chunked_stream = super::record_stream(
             boxed,
             vec![b'!'],
-            Arc::new(mock_stream_formatter().await),
+            Arc::new(mock_stream_formatter().await.into()),
         );
 
         let first_chunk = chunked_stream.next().await;

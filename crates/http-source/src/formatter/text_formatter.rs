@@ -50,7 +50,7 @@ impl TextFormatter {
         };
         // Body with an empty line between
         if let Some(body) = body {
-            record_out_parts.push(body.clone());
+            record_out_parts.push(String::from_utf8_lossy(body).to_string());
         }
 
         Ok(record_out_parts.join("\n"))

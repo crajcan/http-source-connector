@@ -1,4 +1,5 @@
 use anyhow::{Context, Error, Result};
+use bytes::Bytes;
 use reqwest::Response;
 
 #[derive(Debug, Default, Clone)]
@@ -7,7 +8,7 @@ pub(crate) struct HttpResponseRecord {
     pub status_code: Option<u16>,
     pub status_string: Option<&'static str>,
     pub headers: Option<Vec<HttpHeader>>,
-    pub body: Option<String>,
+    pub body: Option<Bytes>,
 }
 
 #[derive(Debug, Clone)]
@@ -26,7 +27,7 @@ impl HttpResponseRecord {
             .text()
             .await
             .context("Failed to read response body")?;
-        response_record.body = Some(body);
+        response_record.body = Some(body.into());
         Ok(response_record)
     }
 }
